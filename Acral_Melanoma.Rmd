@@ -3,9 +3,8 @@ title: "Acral_Melanoma"
 author: "Chen Lu"
 date: "2/16/2021"
 output:
-  html_document: default
-  word_document: default
-  pdf_document: default
+  html_document:
+    df_print: paged
 ---
 
 ```{r setup, include=FALSE}
