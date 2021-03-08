@@ -1,0 +1,391 @@
+---
+title: "Acral_Melanoma"
+author: "Chen Lu"
+date: "2/16/2021"
+output:
+  html_document: default
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+rm(list=ls())
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+```
+
+```{r load data}
+setwd('/Users/chenyuelu/Desktop/things/MBI/research/SemenovLab/Melanoma_Pearl/')
+read_excel_allsheets <- function(filename, tibble = TRUE) {
+    # I prefer straight data.frames
+    # but if you like tidyverse tibbles (the default with read_excel)
+    # then just pass tibble = TRUE
+    sheets <- readxl::excel_sheets(filename)
+    x <- lapply(sheets, function(X) readxl::read_excel(filename, sheet = X))
+    if(!tibble) x <- lapply(x, as.data.frame)
+    names(x) <- sheets
+    x
+}
+df_all <- read_excel_allsheets('Melanoma AGO 2021_20_02_notes.xlsx')
+df <- df_all$`Use this Sheet!`
+head(df)
+```
+
+```{r data cleaning}
+df_clean <- df %>%
+    mutate(race_ethnicity = case_when(`Race/Ethnicity` == 'White' ~ 'Non-Hispanic White',
+           `Race/Ethnicity` == 'Black or African American' ~ 'Non-Hispanic Black',
+            `Race/Ethnicity` == 'Not Recorded' ~ 'Unknown',
+            `Race/Ethnicity` == 'Hispanic-Other' ~ 'Hispanic',
+            `Race/Ethnicity` == 'Asian' ~ 'Asian',
+            `Race/Ethnicity` == 'American Indian' ~ 'Other',
+            `Race/Ethnicity` == 'Native Hawaiian or Pacific Islander' ~ 'Other',
+            `Race/Ethnicity` == 'Hispanic-Black' ~ 'Hispanic')) %>%
+    mutate(white = case_when(`Race/Ethnicity` == 'White' ~ 'Non-Hispanic White',
+                             `Race/Ethnicity` == 'Not Recorded' ~ 'Unknown',
+                             TRUE ~ 'POC')) %>%
+    mutate(insurance_type = case_when(`Self-pay-0, Medicaid-1, Other-2, International-3` == 0 ~ 'Self-pay',
+                                      `Self-pay-0, Medicaid-1, Other-2, International-3` == 1 ~ 'Medicaid',
+                                      `Self-pay-0, Medicaid-1, Other-2, International-3` == 2 ~ 'Private_or_public',
+                                      `Self-pay-0, Medicaid-1, Other-2, International-3` == 3 ~ 'International')) %>%
+    mutate(dx_date = as.Date(as.numeric(`Date of diagnosis`), origin = '1899-12-30')) %>% # some formatting necessary for R to read dates
+    select(ID, Gender, race_ethnicity, white, `Marital Status`, insurance_type, DOB, dx_date, `Final Stage`, Location, Laterality, `Age  of last f/u or death`, `vital status (1 = alive, 0 = dead)`, immunotherapy, `chemotherapy?`)
+
+colnames(df_clean) <- c('ID', 'Gender', 'Race_ethnicity','White_or_POC', 'Marital_Status', 'insurance_type', 'DOB', 'dx_date', 'Final_Stage', 'Location', 'Laterality', 'follow_up_date', 'Alive', 'immuno','chemo')
+
+# define reference group for each variable
+df_clean$Race_ethnicity <- factor(df_clean$Race_ethnicity, levels=c("Non-Hispanic White","Non-Hispanic Black","Hispanic","Asian","Other","Unknown"))
+df_clean$Race_ethnicity = relevel(df_clean$Race_ethnicity, ref = "Non-Hispanic White")
+
+df_clean$White_or_POC <- factor(df_clean$White_or_POC, levels=c("Non-Hispanic White","POC","Unknown"))
+df_clean$White_or_POC = relevel(df_clean$White_or_POC, ref = "Non-Hispanic White")
+
+df_clean$Gender <- factor(df_clean$Gender, levels=c("Male", "Female"))
+df_clean$Gender = relevel(df_clean$Gender, ref = "Male")
+
+df_clean$Final_Stage <- factor(df_clean$Final_Stage, levels=c("0","1",'2','3','4','na'))
+df_clean$Final_Stage = relevel(df_clean$Final_Stage, ref = "0")
+
+df_clean$insurance_type <- factor(df_clean$insurance_type, levels=c("Private_or_public","Self-pay",'Medicaid','International'))
+df_clean$insurance_type = relevel(df_clean$insurance_type, ref = "Private_or_public")
+
+df_clean$immuno <- factor(df_clean$immuno, levels=c("Y","N"))
+df_clean$immuno = relevel(df_clean$immuno, ref = "N")
+
+df_clean$chemo <- factor(df_clean$chemo, levels=c("Y","N"))
+df_clean$chemo = relevel(df_clean$chemo, ref = "N")
+```
+
+```{r Race and ethnicity breakdown}
+race_counts <- df_clean %>%
+    group_by(Race_ethnicity) %>%
+    summarize(Total_Counts = n())
+
+race_counts
+
+stage_counts <- df_clean %>%
+    group_by(Final_Stage) %>%
+    summarize(Total_Counts = n())
+
+stage_counts
+
+```
+
+```{r Gender}
+df_gender <- df_clean %>%
+    group_by(Race_ethnicity,Gender) %>% 
+    summarise(counts=n()) %>% 
+    group_by(Race_ethnicity) %>% 
+    mutate(Total=sum(counts)) %>%
+    filter(Gender=='Male') %>% 
+    select(Race_ethnicity, counts, Total) %>%
+    rename('Males'=counts) %>%
+    mutate(percentage = round(100*Males/Total,2))
+
+# Let's see the breakdown 
+df_gender
+
+# overall percentages
+print(paste('total number of males:',sum(df_clean$Gender == 'Male')))
+print(paste('total number of people with gender labels:',length(df_clean$Gender)))
+
+prop.test(sum(df_clean$Gender == 'Male'), length(df_clean$Gender), p = 0.5)
+
+# separate race groups 
+prop.test(df_gender$Males, df_gender$Total)
+
+# White vs POC
+POC_gender <- df_clean %>%
+    group_by(White_or_POC,Gender) %>% 
+    summarise(counts=n()) %>% 
+    group_by(White_or_POC) %>% 
+    mutate(Total=sum(counts)) %>%
+    filter(Gender=='Male') %>%
+    select(White_or_POC, counts, Total) %>%
+    rename('Males'=counts)%>%
+    mutate(percentage = round(100*Males/Total,2))
+
+POC_gender 
+
+# testing if there is a difference between white and POC in gender breakdown
+prop.test(POC_gender$Males, POC_gender$Total)
+```
+**Gender**
+
+**1. Looking at overall percentage of males in the dataset, we see less than 50% were males. p-value is significant. Confidence interval does not include 0.5 (the assumption that there is equal number of males and females). **
+
+**2. Comparing white and individual race groups. Here the null hypothesis is that the proportion of males is the same in each race group: p1 = p2 = p3 = p4 = p5. The p-value here is 0.6815, which is not significant, so we cannot reject the null hypothesis. Simply put, the gender proportions across the race groups are the same. **
+
+**3. Comparing white and POC (combining individual race groups) and Unknown. The p-value is 0.3371, still not significant.** 
+
+```{r Location}
+df_location <- df_clean %>%
+    group_by(Race_ethnicity,Location) %>% 
+    summarise(counts=n()) %>% 
+    group_by(Race_ethnicity) %>% 
+    mutate(Total=sum(counts)) %>%
+    filter(Location=='foot') %>% 
+    select(Race_ethnicity, counts, Total) %>%
+    rename('Foot'=counts) %>%
+    mutate(percentage = round(100*Foot/Total,2))
+
+df_location
+
+print(paste('total number of foot acral melanoma:',sum(df_clean$Location == 'foot')))
+print(paste('total number of people with location labels:',sum(df_clean$Location!='na')))
+
+prop.test(sum(df_clean$Location == 'foot'), sum(df_clean$Location!='na'), p = 0.5)
+
+# separate race groups 
+prop.test(df_location$Foot, df_location$Total)
+
+# White vs POC
+POC_gender <- df_clean %>%
+    group_by(White_or_POC,Location) %>% 
+    summarise(counts=n()) %>% 
+    group_by(White_or_POC) %>% 
+    mutate(Total=sum(counts)) %>%
+    filter(Location=='foot') %>%
+    select(White_or_POC, counts, Total) %>%
+    rename('Foot'=counts) %>%
+    mutate(percentage = round(100*Foot/Total,2))
+
+POC_gender 
+
+# testing if there is a difference between white and POC in gender breakdown
+prop.test(POC_gender$Foot, POC_gender$Total)
+```
+**Location**
+
+**1. Overall there are significantly more foot acral melanoma than hand. See results above. **
+
+**2. Comparing white and individual race groups. Here the null hypothesis is that the proportion of foot melanoma is the same in each race group: p1 = p2 = p3 = p4 = p5. The p-value here is 0.0484, which is just below the 0.05 p-value threshold, so we can maybe reject the null hypothesis. Simply put, at least one of the races had a different percentage of melanoma location from the other races. **
+
+**3. Comparing white and POC (combining individual race groups) and Unknown. The p-value is 0.1127, not significant.** 
+
+```{r Laterality}
+df_laterality <- df_clean %>%
+    group_by(Race_ethnicity,Laterality) %>% 
+    summarise(counts=n()) %>% 
+    group_by(Race_ethnicity) %>% 
+    mutate(Total=sum(counts)) %>%
+    filter(Laterality=='L') %>% 
+    select(Race_ethnicity, counts, Total) %>%
+    rename('L'=counts) %>%
+    mutate(percentage = round(100*L/Total,2))
+
+df_laterality
+print(paste('total number of left acral melanoma:',sum(df_clean$Laterality == 'L')))
+print(paste('total number of people with laterality labels:',sum(df_clean$Laterality!='na')))
+
+prop.test(sum(df_clean$Laterality == 'L'), sum(df_clean$Laterality!='na'), p = 0.5)
+
+# separate race groups 
+prop.test(df_laterality$L, df_laterality$Total)
+
+# White vs POC
+POC_laterality <- df_clean %>%
+    group_by(White_or_POC,Laterality) %>% 
+    summarise(counts=n()) %>% 
+    group_by(White_or_POC) %>% 
+    mutate(Total=sum(counts)) %>%
+    filter(Laterality=='L') %>%
+    select(White_or_POC, counts, Total) %>%
+    rename('L'=counts) %>%
+    mutate(percentage = round(100*L/Total,2))
+POC_laterality
+
+prop.test(POC_laterality$L, POC_laterality$Total)
+```
+**Laterality**
+
+**Overall, there is no difference in laterality. Left and right occur about the same amount of time.**
+
+**2. Comparing white and individual race groups. Here the null hypothesis is that the proportion of foot melanoma is the same in each race group: p1 = p2 = p3 = p4 = p5. The p-value here is 0.7886., which is not significant, so we cannot reject the null hypothesis. **
+
+**3. Comparing white and POC (combining individual race groups) and Unknown. The p-value is 0.7387, still not significant.** 
+
+**4. No difference in laterality across ethnicity groups.**
+
+```{r Insurance type}
+df_insurance <- df_clean %>%
+    group_by(Race_ethnicity,insurance_type) %>% 
+    summarise(counts=n()) %>% 
+    group_by(Race_ethnicity) %>% 
+    mutate(Total=sum(counts)) %>%
+    filter(insurance_type=='Private_or_public') %>% 
+    select(Race_ethnicity, counts, Total) %>%
+    rename('Private_or_public'=counts) %>%
+    mutate(percentage = round(100*Private_or_public/Total,2))
+
+df_insurance
+
+print(paste('total number of people with private or public insurance:',sum(df_clean$insurance_type == 'Private_or_public')))
+print(paste('total number of people with insurance labels:',sum(df_clean$insurance_type!='na')))
+
+# separate race groups 
+prop.test(df_insurance$Private_or_public, df_insurance$Total)
+
+# White vs POC
+POC_insurance <- df_clean %>%
+    group_by(White_or_POC,insurance_type) %>% 
+    summarise(counts=n()) %>% 
+    group_by(White_or_POC) %>% 
+    mutate(Total=sum(counts)) %>%
+    filter(insurance_type=='Private_or_public') %>%
+    select(White_or_POC, counts, Total) %>%
+    rename('Private_or_public'=counts) %>%
+    mutate(percentage = round(100*Private_or_public/Total,2))
+
+POC_insurance
+
+prop.test(POC_insurance$Private_or_public, POC_insurance$Total)
+```
+**Insurance**
+
+**It seems that White people have higher rates of having insurance for both analyses.**
+
+```{r survival analysis}
+library(survival)
+library(survminer)
+
+df_survival <- df_clean %>%
+  select(Gender, Race_ethnicity, Laterality, DOB, dx_date, follow_up_date, Alive, Final_Stage, immuno, chemo) %>%
+  mutate(age_diagnosed = time_length(difftime(dx_date, DOB), "years")) %>% # difference between DOB and diagnosis date
+  mutate(age_fu=time_length(difftime(follow_up_date, DOB), "years")) %>% #difference between DOB and followup date
+  mutate(yrs_post_dx = time_length(difftime(follow_up_date, dx_date), "years")) %>% # difference between diagnosis date and followup date
+  mutate(status = case_when(Alive=='0' ~ '2',
+                            TRUE ~ Alive)) %>% # consistent with survfit documentation 
+  select(-Alive)
+
+df_survival$status = as.numeric(df_survival$status)
+
+head(df_survival)
+
+
+# multivariate Cox regression to how race, diagnosis stage, and diagnosis date affect the survival time simultaneously 
+res.cox <- coxph(Surv(yrs_post_dx, status) ~ Race_ethnicity + Laterality + Gender + Final_Stage + age_diagnosed + immuno + chemo, data =  df_survival)
+summary(res.cox)
+```
+
+**For interpretations of the Cox regression model, you can use this as a reference: http://www.sthda.com/english/wiki/cox-proportional-hazards-model.** 
+
+**The Pr (>|z|) column indicates p-value, and exp(coef) column indicates hazard ratio. We see, for example, stage 4 has a hazard ratio of 22.76. This means, holding other variables the same, having stage 4 increases the hazard 23 fold compared to stage 0.** 
+
+**There doesn't seem to be a difference between races in terms of survival since initial diagnosis date**
+
+**Strangely, if laterality is unknown, these patients die at a much faster rate than if laterality is L or R - there could be some confounders here**
+
+**age diagnosis is correlated with higher chance of death, which makes sense**
+
+**immunotherapy is protective against dying, which also makes sense**
+
+
+```{r sub analysis of patients who received immunotherapy}
+# for patients without immunotherapy, what are their characteristics? age, race, gender, stage, time of diagnosis (compared to 2011), insurance.
+immuno_pt <- df_clean %>% filter(immuno == 'Y')
+
+print(paste('There are', dim(immuno_pt)[1],'patients who received immunotherapy in total.'))
+
+# birthyear 
+summary(immuno_pt$DOB)
+
+# laterality
+print(paste(sum(immuno_pt$Laterality=='L'), 'are on the left side'))
+prop.test(sum(immuno_pt$Laterality=='L'), dim(immuno_pt)[1]) # no difference in laterality
+
+# location
+print(paste(sum(immuno_pt$Location=='foot'), 'are on the foot.'))
+prop.test(sum(immuno_pt$Location=='foot'), dim(immuno_pt)[1]) # more on the foot than hand
+
+# race breakdown
+immuno_race <- immuno_pt %>% 
+  group_by(Race_ethnicity) %>%
+  summarise(received_immuno = n())
+
+immuno_race <- merge(immuno_race, race_counts, on='Race_ethnicity') %>%
+  mutate(percentage = received_immuno/Total_Counts)
+
+immuno_race
+
+# gender
+prop.test(sum(immuno_pt$Gender=='Male'), dim(immuno_pt)[1]) # males and females seem to get immunotherapy at the same rate
+
+# year of diagnosis
+summary(immuno_pt$dx_date)
+
+print(paste('Out of',dim(immuno_pt)[1],'patients who received immunotherapy,',sum(immuno_pt$dx_date>'2011-01-01'),'had their first diagnoses after 2011-01-01.'))
+
+# stage breakdown
+immuno_stage <- immuno_pt %>% 
+  group_by(Final_Stage) %>%
+  summarise(pts_in_stage_w_immuno = n())
+
+immuno_stage <- merge(immuno_stage, stage_counts, on='Final_Stage') %>%
+  mutate(percentage = pts_in_stage_w_immuno/Total_Counts)
+
+immuno_stage
+
+# insurance
+summary(immuno_pt$insurance_type)
+```
+
+
+```{r sub analysis of patients with stage 3 or 4 cancer}
+stage34_pt <- df_clean %>% filter(Final_Stage %in% c(3,4))
+
+print(paste('There are', dim(stage34_pt)[1],'patients who were labeled as stage 3 or 4 in total.'))
+
+stage34_pt <- stage34_pt %>%
+  select(Gender, Race_ethnicity, Laterality, DOB, dx_date, follow_up_date, Alive, Final_Stage, immuno, chemo) %>%
+  mutate(age_diagnosed = time_length(difftime(dx_date, DOB), "years")) %>% # difference between DOB and diagnosis date
+  mutate(age_fu=time_length(difftime(follow_up_date, DOB), "years")) %>% #difference between DOB and followup date
+  mutate(yrs_post_dx = time_length(difftime(follow_up_date, dx_date), "years")) %>% # difference between diagnosis date and followup date
+  mutate(status = case_when(Alive=='0' ~ '2',
+                            TRUE ~ Alive)) %>% # consistent with survfit documentation 
+  select(-Alive)
+
+stage34_pt$status = as.numeric(stage34_pt$status)
+
+# for patients with stage 3 or 4, what is the diff in mean survival between ppl with immunotherapy or not (unit in years post diagnosis)
+fit_stage34_pt <- survfit(Surv(yrs_post_dx, status) ~ immuno, data = stage34_pt)
+print(fit_stage34_pt)
+
+ggsurvplot(fit_stage34_pt,
+          pval = TRUE, conf.int = TRUE,
+          risk.table = TRUE, # Add risk table
+          risk.table.col = "strata", # Change risk table color by groups
+          linetype = "strata", # Change line type by groups
+          surv.median.line = "hv", # Specify median survival
+          fontsize = 3,
+          surv.plot.height = 2
+          )
+
+res.cox <- coxph(Surv(yrs_post_dx, status) ~ immuno, data =  stage34_pt)
+summary(res.cox)
+```
+
+
+**After subsetting the patients in stage 3 or 4, we still see that immunotherapy is protective of patient survival.**
