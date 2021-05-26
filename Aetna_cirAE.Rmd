@@ -1,0 +1,105 @@
+---
+title: "Aetna_cirAE"
+author: "Chen Lu"
+date: "2/21/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+rm(list=ls())
+```
+
+```{r}
+setwd('/Users/chenyuelu/Desktop/things/MBI/research/SemenovLab/main_Aetna_cirAE/')
+```
+
+```{r comorbid_categories.csv}
+library(PheWAS)
+comorbidity <- read.csv('comorbid_categories.csv') %>% dplyr::rename(code='Code')
+load(file='phecode_map.rda')
+load(file='pheinfo.rda')
+
+comorbidity_phecode <- left_join(comorbidity, phecode_map)
+comorbidity_phewas <- left_join(comorbidity_phecode, pheinfo[c('phecode','description','group')])
+
+```
+
+```{r all ICD codes of ICI patients}
+icd <- read.csv('ICD.csv', header = F)
+colnames(icd) <- c('code')
+
+phecode <- left_join(icd, phecode_map)
+# phewas <- PheWAS::addPhecodeInfo(phecode) 
+phewas <- left_join(phecode, pheinfo[c('phecode','description','group')])
+```
+
+```{r reassign groups}
+# autoimmune icd codes from https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2892249/
+phewas <- phewas %>% 
+  mutate(tier_1=case_when(group=='neoplasms' ~ NA_character_,
+                          group=='symptoms' ~ 'other',
+                          group=='pregnancy complications' ~ 'other', 
+                          group=='congenital anomalies' ~ 'other', 
+                          group=='injuries & poisonings' ~ 'other', 
+                          group=='sense organs' ~ 'other', 
+                          TRUE ~ group)) %>% 
+  mutate(tier_2=case_when(code %in% c('D51.0','D59.1','D69.3','E05.0','E06.3',
+                                      'E10','E27.1','G35','G61.0','H20',
+                                      'K50','K51','K73','K74.3','K90.0',
+                                      'L10','L12','L40','L40.4','L63',
+                                      'L80.9','M05','M06','M08','M31.3',
+                                      'M33','M31.5','M31.6','M35.3','G70.0',
+                                      'M34','M32.1','M32.9','M35.0','M45.9') ~ 'Autoimmune',
+                          group=='neoplasms' ~ NA_character_,
+                          group=='symptoms' ~ 'other',
+                          group=='pregnancy complications' ~ 'other', 
+                          group=='congenital anomalies' ~ 'other', 
+                          group=='injuries & poisonings' ~ 'other', 
+                          group=='sense organs' ~ 'other', 
+                          group=='neurological' ~ 'other',
+                          group=='genitourinary' ~ 'other',
+                          group=='respiratory' ~ 'other',
+                          group=='hematopoietic' ~ 'other',
+                          group=='infectious diseases' ~ 'other',
+                          TRUE ~ group)) %>% 
+  mutate(tier_3=case_when(code %in% comorbidity[which(comorbidity$Category=='Autoimmune'),]$code | tier_2=='Autoimmune'~ 'Autoimmune',
+                          TRUE ~ tier_2))
+
+
+comorbidity_phewas <- comorbidity_phewas %>% 
+  mutate(tier_1=case_when(group=='neoplasms' ~ NA_character_,
+                          group=='symptoms' ~ 'other',
+                          group=='pregnancy complications' ~ 'other', 
+                          group=='congenital anomalies' ~ 'other', 
+                          group=='injuries & poisonings' ~ 'other', 
+                          group=='sense organs' ~ 'other', 
+                          TRUE ~ group)) %>% 
+  mutate(tier_2=case_when(code %in% c('D51.0','D59.1','D69.3','E05.0','E06.3',
+                                      'E10','E27.1','G35','G61.0','H20',
+                                      'K50','K51','K73','K74.3','K90.0',
+                                      'L10','L12','L40','L40.4','L63',
+                                      'L80.9','M05','M06','M08','M31.3',
+                                      'M33','M31.5','M31.6','M35.3','G70.0',
+                                      'M34','M32.1','M32.9','M35.0','M45.9') ~ 'Autoimmune',
+                          group=='neoplasms' ~ NA_character_,
+                          group=='symptoms' ~ 'other',
+                          group=='pregnancy complications' ~ 'other', 
+                          group=='congenital anomalies' ~ 'other', 
+                          group=='injuries & poisonings' ~ 'other', 
+                          group=='sense organs' ~ 'other', 
+                          group=='neurological' ~ 'other',
+                          group=='genitourinary' ~ 'other',
+                          group=='respiratory' ~ 'other',
+                          group=='hematopoietic' ~ 'other',
+                          group=='infectious diseases' ~ 'other',
+                          TRUE ~ group)) %>% 
+  mutate(tier_3=case_when(Category=='Autoimmune' | tier_2=='Autoimmune'~ 'Autoimmune',
+                          TRUE ~ tier_2))
+
+
+
+write.csv(phewas, 'ICD_PheWAS.csv')
+write.csv(comorbidity_phewas, 'comorbid_phewas_mapping.csv')
+
+```
